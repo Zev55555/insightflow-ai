@@ -48,7 +48,7 @@ Copy-Item .env.example .env.local
 
 ```bash
 OPENAI_API_KEY=你的OpenAI密钥
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL=自定义
 ```
 
 请不要把真实的 `.env.local` 提交到 GitHub 或分享给别人。
@@ -64,7 +64,7 @@ npm run dev
 打开：
 
 ```bash
-http://localhost:3000
+https://ai-data-analysis-assistant-six.vercel.app/
 ```
 
 ## 公开部署与用户自定义 API Key
