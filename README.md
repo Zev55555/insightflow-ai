@@ -1,18 +1,19 @@
 # AI 数据分析业务流程助手
 
-当前版本：v0.3.0
+当前版本：v0.4.0
 
 这是一个面向数据分析新手的 MVP Web 应用。它帮助用户把模糊的业务需求，转化成清晰的数据分析思路、指标体系、业务假设、分析路径、风险提醒和汇报大纲。
 
 本工具不会生成 SQL、Python、pandas、Excel 公式、数据清洗代码或仪表盘。
 
-## v0.3 更新
+## v0.4 更新
 
-- 支持用户在网页内配置自己的 OpenAI API Key
-- 支持选择模型：`gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-4.1`、`gpt-4.1-mini` 或自定义模型
-- 支持“仅本次会话保存”和“保存到本地浏览器”
-- 后端支持用户 API Key 优先，`.env.local` 作为 fallback
-- 不需要登录系统，不保存数据库
+- 支持用户在网页内选择不同 AI 服务商
+- 支持 OpenAI、DeepSeek、Claude、Gemini、OpenAI-Compatible 自定义接口
+- 支持填写 API Key、API Base URL 和模型名称
+- 继续保持 BYOK 模式：用户自带 API Key
+- API Key 可选择仅本次会话保存，或保存到本地浏览器
+- 后端只在本次生成请求中临时使用用户 API Key，不保存到数据库
 
 ## 开发方式说明
 
@@ -29,7 +30,7 @@
 - Tailwind CSS
 - Framer Motion
 - Lucide React
-- OpenAI API
+- AI 服务商 API
 - 可部署到 Vercel
 
 ## 本地安装
@@ -40,26 +41,9 @@
 npm install
 ```
 
-复制环境变量示例文件：
+当前版本是用户自带 API Key 的 BYOK 模式，通常不需要配置 `.env.local`。
 
-```bash
-cp .env.example .env.local
-```
-
-Windows PowerShell 可以使用：
-
-```powershell
-Copy-Item .env.example .env.local
-```
-
-`.env.local` 是可选 fallback。你可以填入默认 API Key：
-
-```bash
-OPENAI_API_KEY=你的OpenAI密钥
-OPENAI_MODEL=自定义
-```
-
-请不要把真实的 `.env.local` 提交到 GitHub 或分享给别人。
+请不要把真实 API Key 提交到 GitHub 或分享给别人。
 
 ## 本地运行
 
@@ -69,51 +53,76 @@ OPENAI_MODEL=自定义
 npm run dev
 ```
 
-打开：
+本地打开：
+
+```bash
+http://localhost:3000
+```
+
+在线部署示例：
 
 ```bash
 https://ai-data-analysis-assistant-six.vercel.app/
 ```
 
-## 公开部署与用户自定义 API Key
+## 多模型 API 配置
 
-这个版本可以公开部署给其他用户使用。用户打开网站后，点击右上角“设置”，输入自己的 OpenAI API Key 和模型名称即可使用。
+本项目支持用户自定义 AI 服务商。当前支持：
 
-用户可以选择两种保存方式：
+- OpenAI
+- DeepSeek
+- Claude
+- Gemini
+- OpenAI-Compatible 自定义接口
+- 其他 / 自定义
 
-- 仅本次会话保存：使用 `sessionStorage` 保存 `openai_api_key` 和 `openai_model`
-- 保存到本地浏览器：使用 `localStorage` 保存 `openai_api_key` 和 `openai_model`
+用户可以在右上角“设置”弹窗里填写：
+
+- AI 服务商
+- API Key
+- API Base URL
+- 模型名称
+- 保存方式
+
+API Key 保存方式：
+
+- 仅本次会话保存：使用 `sessionStorage` 保存 `ai_provider`、`api_key`、`api_base_url`、`model`、`custom_model`
+- 保存到本地浏览器：使用 `localStorage` 保存 `ai_provider`、`api_key`、`api_base_url`、`model`、`custom_model`
 
 页面加载时会优先读取 `sessionStorage`，如果没有再读取 `localStorage`。
 
-项目不会把用户 API Key 保存到数据库。后端只会在本次请求中临时使用用户传来的 API Key 调用 OpenAI，不会保存、不返回、不打印完整 Key。
+项目不会把用户 API Key 保存到数据库。后端只会在本次请求中临时使用用户传来的 API Key 调用所选 AI 服务商，不会保存、不返回、不打印完整 Key。
 
-实际生成分析流程时，后端会使用用户配置的 API Key 和模型名称调用 OpenAI。
+OpenAI-Compatible 模式适合支持 OpenAI API 格式的第三方平台，例如 OpenRouter、硅基流动、部分国产模型平台等。使用时请按照服务商文档填写 API Base URL 和模型名称。
 
-开发者也可以使用 `.env.local` 配置默认 API Key，作为用户未配置 Key 时的 fallback。优先级是：
+如果第三方接口调用失败，请检查：
 
-1. 用户设置里的 API Key
-2. 服务端环境变量 `OPENAI_API_KEY`
-3. 都没有则提示用户配置 API Key
+- API Base URL 是否正确
+- 模型名称是否正确
+- API Key 是否有效
+- 账户额度是否充足
+- 当前服务商是否真的兼容 OpenAI Chat Completions 格式
 
-模型优先级是：
+不建议在公共电脑上选择“保存到本地浏览器”。
 
-1. 用户设置里的模型名称
-2. 服务端环境变量 `OPENAI_MODEL`
-3. 默认 `gpt-4.1-mini`
+## 各服务商调用方式
 
-建议用户使用单独创建的 Project API Key，并设置合理预算和权限。不要在公共电脑上选择“保存到本地浏览器”。
-
-如果生成失败，请检查 API Key、模型名称、账户额度或网络状态。
-
+- OpenAI：按 OpenAI-compatible 的 Chat Completions 格式调用，默认 Base URL 为 `https://api.openai.com/v1`
+- DeepSeek：按 OpenAI-compatible 的 Chat Completions 格式调用，默认 Base URL 为 `https://api.deepseek.com`
+- Claude：按 Anthropic Messages API 格式调用
+- Gemini：按 Google Gemini `generateContent` REST 格式调用
+- OpenAI-Compatible：按用户填写的 Base URL 调用 `/chat/completions`
+- 自定义：先按 OpenAI-compatible 格式尝试调用；如果失败，请检查接口文档
 
 ## 使用流程
 
-1. 点击右上角“设置”，配置 API Key 和模型。
-2. 选择业务场景。
-3. 选择常见业务问题，或填写自己的具体问题。
-4. 手动补充已知信息，或上传 CSV 文件识别字段结构。
-5. 点击生成分析流程，查看结构化结果卡片。
+1. 点击右上角“设置”，选择 AI 服务商。
+2. 填写自己的 API Key、API Base URL 和模型名称。
+3. 选择保存方式并点击“保存设置”。
+4. 选择业务场景。
+5. 选择常见业务问题，或填写自己的具体问题。
+6. 手动补充已知信息，或上传 CSV 文件识别字段结构。
+7. 点击生成分析流程，查看结构化结果卡片。
 
 生成结果包括：
 
@@ -147,10 +156,10 @@ npm run build
 
 ```text
 app/
-  api/generate/route.js  后端接口：调用 OpenAI API，要求 AI 返回结构化 JSON
+  api/generate/route.js  后端接口：根据服务商调用不同 AI API，并要求 AI 返回结构化 JSON
   globals.css            全局样式和 Tailwind CSS 引入
   layout.js              页面基础结构、网页标题和描述
-  page.js                四步向导、API 设置弹窗、CSV 预览、结果卡片展示
+  page.js                四步向导、多服务商 API 设置弹窗、CSV 预览、结果卡片展示
 .env.example             环境变量示例文件
 package.json             项目依赖和运行命令
 ```
@@ -159,9 +168,6 @@ package.json             项目依赖和运行命令
 
 1. 把项目推送到 GitHub。
 2. 在 Vercel 中导入仓库。
-3. 可选：在 Vercel 项目设置中添加环境变量：
-   - `OPENAI_API_KEY`
-   - `OPENAI_MODEL`
-4. 部署。
+3. 部署。
 
-如果不配置服务端环境变量，用户仍然可以在网页设置中输入自己的 API Key 使用。
+当前版本不需要在 Vercel 中配置统一的服务端 API Key。用户可以在网页设置中输入自己的 API Key 使用。

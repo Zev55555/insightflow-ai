@@ -31,10 +31,69 @@ import { useEffect, useMemo, useState } from "react";
 
 const steps = ["选择业务场景", "选择或填写业务问题", "补充信息 / 上传数据", "生成分析流程"];
 
-const API_KEY_STORAGE_KEY = "openai_api_key";
-const MODEL_STORAGE_KEY = "openai_model";
-const DEFAULT_MODEL = "gpt-4.1-mini";
-const MODEL_OPTIONS = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-4.1", "gpt-4.1-mini", "custom"];
+const PROVIDER_STORAGE_KEY = "ai_provider";
+const API_KEY_STORAGE_KEY = "api_key";
+const API_BASE_URL_STORAGE_KEY = "api_base_url";
+const MODEL_STORAGE_KEY = "model";
+const CUSTOM_MODEL_STORAGE_KEY = "custom_model";
+const STORAGE_MODE_STORAGE_KEY = "storage_mode";
+const LEGACY_API_KEY_STORAGE_KEY = "openai_api_key";
+const LEGACY_MODEL_STORAGE_KEY = "openai_model";
+const DEFAULT_PROVIDER = "openai";
+
+const providerOptions = [
+  {
+    id: "openai",
+    label: "OpenAI",
+    statusLabel: "OpenAI",
+    description: "使用 OpenAI 官方 API",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    models: ["gpt-4.1-mini", "gpt-4.1", "gpt-5.4-mini", "custom"],
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    statusLabel: "DeepSeek",
+    description: "使用 DeepSeek API",
+    defaultBaseUrl: "https://api.deepseek.com",
+    models: ["deepseek-chat", "deepseek-reasoner", "custom"],
+  },
+  {
+    id: "claude",
+    label: "Claude",
+    statusLabel: "Claude",
+    description: "使用 Anthropic Claude API",
+    defaultBaseUrl: "https://api.anthropic.com",
+    models: ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "custom"],
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    statusLabel: "Gemini",
+    description: "使用 Google Gemini API",
+    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    models: ["gemini-1.5-flash", "gemini-1.5-pro", "custom"],
+  },
+  {
+    id: "openai-compatible",
+    label: "OpenAI-Compatible",
+    statusLabel: "自定义接口",
+    description: "兼容 OpenAI API 格式的第三方服务",
+    defaultBaseUrl: "",
+    models: ["custom"],
+  },
+  {
+    id: "custom",
+    label: "自定义",
+    statusLabel: "自定义接口",
+    description: "手动配置 API Base URL、模型名称和请求格式",
+    defaultBaseUrl: "",
+    models: ["custom"],
+  },
+];
+
+const providerById = Object.fromEntries(providerOptions.map((provider) => [provider.id, provider]));
+const DEFAULT_MODEL = providerById[DEFAULT_PROVIDER].models[0];
 
 const scenarioOptions = [
   {
@@ -158,6 +217,23 @@ function maskApiKey(apiKey) {
   return `${prefix}-****${suffix}`;
 }
 
+function getProviderConfig(providerId) {
+  return providerById[providerId] || providerById[DEFAULT_PROVIDER];
+}
+
+function getDefaultModel(providerId) {
+  const provider = getProviderConfig(providerId);
+  return provider.models.find((model) => model !== "custom") || "";
+}
+
+function shouldShowBaseUrl(providerId) {
+  return ["openai", "deepseek", "openai-compatible", "custom"].includes(providerId);
+}
+
+function requiresBaseUrl(providerId) {
+  return ["openai-compatible", "custom"].includes(providerId);
+}
+
 function resolveModel(modelChoice, customModel) {
   if (modelChoice === "custom") return customModel.trim();
   return modelChoice || DEFAULT_MODEL;
@@ -264,6 +340,10 @@ function Notice({ type = "warning", children }) {
 
 function SettingsModal({
   open,
+  provider,
+  setProvider,
+  baseUrl,
+  setBaseUrl,
   apiKey,
   setApiKey,
   modelChoice,
@@ -280,6 +360,19 @@ function SettingsModal({
   onClear,
 }) {
   if (!open) return null;
+
+  const selectedProvider = getProviderConfig(provider);
+  const modelOptions = selectedProvider.models;
+  const baseUrlVisible = shouldShowBaseUrl(provider);
+  const baseUrlRequired = requiresBaseUrl(provider);
+
+  function handleProviderChange(nextProviderId) {
+    const nextProvider = getProviderConfig(nextProviderId);
+    setProvider(nextProviderId);
+    setBaseUrl(nextProvider.defaultBaseUrl);
+    setModelChoice(getDefaultModel(nextProviderId) || "custom");
+    setCustomModel("");
+  }
 
   return (
     <motion.div
@@ -304,11 +397,11 @@ function SettingsModal({
             <div>
               <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-violet-200/18 bg-violet-300/10 px-3 py-1.5 text-xs font-semibold text-violet-100">
                 <KeyRound className="h-3.5 w-3.5" />
-                OpenAI
+                BYOK 多模型配置
               </div>
               <h2 className="text-2xl font-bold text-white">API 设置</h2>
               <p className="mt-2 text-sm leading-7 text-[rgba(255,255,255,0.68)]">
-                配置你的 OpenAI API Key 后，即可使用自己的额度生成业务分析流程。
+                选择 AI 服务商并配置自己的 API Key、模型名称和必要的 API Base URL。
               </p>
             </div>
             <button
@@ -322,10 +415,30 @@ function SettingsModal({
           </div>
 
           <div className="mt-7 space-y-5">
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-100">API 服务商</span>
-              <input value="OpenAI" readOnly className="glass-input min-h-12 w-full px-4 py-3 text-sm text-slate-200" />
-            </label>
+            <div>
+              <span className="mb-3 block text-sm font-semibold text-slate-100">AI 服务商</span>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {providerOptions.map((option) => {
+                  const selected = provider === option.id;
+
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => handleProviderChange(option.id)}
+                      className={`rounded-[22px] border p-4 text-left transition duration-150 ease-out ${
+                        selected
+                          ? "border-violet-300/65 bg-violet-300/12 text-white shadow-[0_0_28px_rgba(139,92,246,0.16)]"
+                          : "border-white/10 bg-white/[0.06] text-slate-300 hover:border-violet-200/40 hover:bg-white/10"
+                      }`}
+                    >
+                      <span className="block text-sm font-bold">{option.label}</span>
+                      <span className="mt-2 block text-xs leading-5 text-[rgba(255,255,255,0.58)]">{option.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-100">API Key</span>
@@ -334,7 +447,7 @@ function SettingsModal({
                   value={apiKey}
                   onChange={(event) => setApiKey(event.target.value)}
                   type={showApiKey ? "text" : "password"}
-                  placeholder="请输入你的 OpenAI API Key"
+                  placeholder="请输入你的 API Key"
                   className="glass-input min-h-12 w-full px-4 py-3 pr-12 text-sm"
                   autoComplete="off"
                 />
@@ -350,20 +463,40 @@ function SettingsModal({
               {apiKey ? <p className="mt-2 text-xs text-slate-400">当前显示：{maskApiKey(apiKey)}</p> : null}
             </label>
 
+            {baseUrlVisible ? (
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-100">
+                  API Base URL{baseUrlRequired ? "（必填）" : ""}
+                </span>
+                <input
+                  value={baseUrl}
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                  placeholder={baseUrlRequired ? "例如：https://api.example.com/v1" : selectedProvider.defaultBaseUrl}
+                  className="glass-input min-h-12 w-full px-4 py-3 text-sm"
+                />
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  {provider === "openai-compatible" || provider === "custom"
+                    ? "请填写服务商文档中提供的 OpenAI-compatible API Base URL。"
+                    : "默认地址已自动填入，通常不需要修改。"}
+                </p>
+              </label>
+            ) : null}
+
             <div>
               <span className="mb-2 block text-sm font-semibold text-slate-100">模型名称</span>
-              <select
-                value={modelChoice}
-                onChange={(event) => setModelChoice(event.target.value)}
-                className="glass-input min-h-12 w-full px-4 py-3 text-sm"
-              >
-                <option value="gpt-5.5">gpt-5.5</option>
-                <option value="gpt-5.4">gpt-5.4</option>
-                <option value="gpt-5.4-mini">gpt-5.4-mini</option>
-                <option value="gpt-4.1">gpt-4.1</option>
-                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                <option value="custom">自定义模型</option>
-              </select>
+              {modelOptions.length > 1 ? (
+                <select
+                  value={modelChoice}
+                  onChange={(event) => setModelChoice(event.target.value)}
+                  className="glass-input min-h-12 w-full px-4 py-3 text-sm"
+                >
+                  {modelOptions.map((model) => (
+                    <option key={model} value={model}>
+                      {model === "custom" ? "自定义模型" : model}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               {modelChoice === "custom" ? (
                 <input
                   value={customModel}
@@ -419,9 +552,9 @@ function SettingsModal({
             ) : null}
 
             <div className="rounded-[24px] border border-violet-200/14 bg-violet-300/[0.08] px-4 py-4 text-sm leading-7 text-[rgba(255,255,255,0.72)]">
-              你的 API Key 只用于向 OpenAI 发起本次分析请求。本工具不会把 API Key 保存到数据库，也不会在页面或日志中展示完整 Key。若选择“保存到本地浏览器”，Key 会保存在当前设备的浏览器存储中，请不要在公共电脑上保存。
+              你的 API Key 只用于向所选 AI 服务商发起本次分析请求。本工具不会把 API Key 保存到数据库，也不会在页面或日志中展示完整 Key。若选择“保存到本地浏览器”，Key 会保存在当前设备浏览器存储中，请不要在公共电脑上保存。
               <br />
-              建议使用单独创建的 Project API Key，并设置合理预算和权限。
+              如果你使用 OpenAI-Compatible 自定义接口，请确认 API Base URL、模型名称和服务商文档一致。不同服务商的模型名称和接口规则可能不同。
             </div>
           </div>
 
@@ -529,6 +662,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [copyLabel, setCopyLabel] = useState("复制结果");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [provider, setProvider] = useState(DEFAULT_PROVIDER);
+  const [baseUrl, setBaseUrl] = useState(providerById[DEFAULT_PROVIDER].defaultBaseUrl);
   const [apiKey, setApiKey] = useState("");
   const [modelChoice, setModelChoice] = useState(DEFAULT_MODEL);
   const [customModel, setCustomModel] = useState("");
@@ -549,35 +684,56 @@ export default function Home() {
 
   const canContinueFromStep2 = Boolean(scenarioName.trim() && businessRequest.trim());
   const canContinueFromStep3 = Boolean(availableInformation.trim() || fileSummary);
-  const activeModel = resolveModel(modelChoice, customModel) || DEFAULT_MODEL;
-  const hasConfiguredApi = Boolean(apiKey.trim());
+  const activeProvider = getProviderConfig(provider);
+  const activeModel = resolveModel(modelChoice, customModel) || getDefaultModel(provider) || DEFAULT_MODEL;
+  const hasConfiguredApi = Boolean(provider && apiKey.trim());
 
   useEffect(() => {
-    const sessionApiKey = sessionStorage.getItem(API_KEY_STORAGE_KEY) || "";
-    const sessionModel = sessionStorage.getItem(MODEL_STORAGE_KEY) || "";
-    const localApiKey = localStorage.getItem(API_KEY_STORAGE_KEY) || "";
-    const localModel = localStorage.getItem(MODEL_STORAGE_KEY) || "";
+    const sessionApiKey = sessionStorage.getItem(API_KEY_STORAGE_KEY) || sessionStorage.getItem(LEGACY_API_KEY_STORAGE_KEY) || "";
+    const sessionProvider = sessionStorage.getItem(PROVIDER_STORAGE_KEY) || "";
+    const sessionBaseUrl = sessionStorage.getItem(API_BASE_URL_STORAGE_KEY) || "";
+    const sessionModel = sessionStorage.getItem(MODEL_STORAGE_KEY) || sessionStorage.getItem(LEGACY_MODEL_STORAGE_KEY) || "";
+    const sessionCustomModel = sessionStorage.getItem(CUSTOM_MODEL_STORAGE_KEY) || "";
+    const localApiKey = localStorage.getItem(API_KEY_STORAGE_KEY) || localStorage.getItem(LEGACY_API_KEY_STORAGE_KEY) || "";
+    const localProvider = localStorage.getItem(PROVIDER_STORAGE_KEY) || "";
+    const localBaseUrl = localStorage.getItem(API_BASE_URL_STORAGE_KEY) || "";
+    const localModel = localStorage.getItem(MODEL_STORAGE_KEY) || localStorage.getItem(LEGACY_MODEL_STORAGE_KEY) || "";
+    const localCustomModel = localStorage.getItem(CUSTOM_MODEL_STORAGE_KEY) || "";
 
     const storedApiKey = sessionApiKey || localApiKey;
-    const storedModel = sessionModel || localModel || DEFAULT_MODEL;
+    const storedProvider = providerById[sessionProvider || localProvider] ? sessionProvider || localProvider : DEFAULT_PROVIDER;
+    const providerConfig = getProviderConfig(storedProvider);
+    const storedBaseUrl = sessionBaseUrl || localBaseUrl || providerConfig.defaultBaseUrl;
+    const storedModel = sessionModel || localModel || getDefaultModel(storedProvider) || "";
+    const storedCustomModel = sessionCustomModel || localCustomModel;
 
     if (storedApiKey) {
       setApiKey(storedApiKey);
       setSaveTarget(sessionApiKey ? "session" : "local");
     }
 
-    if (MODEL_OPTIONS.includes(storedModel)) {
+    setProvider(storedProvider);
+    setBaseUrl(storedBaseUrl);
+
+    if (providerConfig.models.includes(storedModel)) {
       setModelChoice(storedModel);
-      setCustomModel("");
+      setCustomModel(storedCustomModel);
     } else {
       setModelChoice("custom");
-      setCustomModel(storedModel);
+      setCustomModel(storedCustomModel || storedModel);
     }
   }, []);
 
   function saveApiSettings() {
     const trimmedKey = apiKey.trim();
-    const selectedModel = activeModel.trim() || DEFAULT_MODEL;
+    const selectedProvider = provider.trim();
+    const selectedBaseUrl = baseUrl.trim() || activeProvider.defaultBaseUrl;
+    const selectedModel = activeModel.trim();
+
+    if (!selectedProvider) {
+      setSettingsStatus({ type: "error", message: "请先选择 AI 服务商。" });
+      return;
+    }
 
     if (!trimmedKey) {
       setSettingsStatus({ type: "error", message: "请先输入 API Key" });
@@ -585,27 +741,60 @@ export default function Home() {
     }
 
     if (!selectedModel) {
-      setSettingsStatus({ type: "error", message: "请先选择或输入模型名称。" });
+      setSettingsStatus({ type: "error", message: "请先填写模型名称。" });
+      return;
+    }
+
+    if (requiresBaseUrl(selectedProvider) && !selectedBaseUrl) {
+      setSettingsStatus({ type: "error", message: "请填写 API Base URL。" });
       return;
     }
 
     const targetStorage = saveTarget === "local" ? localStorage : sessionStorage;
     const otherStorage = saveTarget === "local" ? sessionStorage : localStorage;
 
+    targetStorage.setItem(PROVIDER_STORAGE_KEY, selectedProvider);
     targetStorage.setItem(API_KEY_STORAGE_KEY, trimmedKey);
+    targetStorage.setItem(API_BASE_URL_STORAGE_KEY, selectedBaseUrl);
     targetStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
+    targetStorage.setItem(CUSTOM_MODEL_STORAGE_KEY, customModel.trim());
+    targetStorage.setItem(STORAGE_MODE_STORAGE_KEY, saveTarget);
+    targetStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
+    targetStorage.removeItem(LEGACY_MODEL_STORAGE_KEY);
+    otherStorage.removeItem(PROVIDER_STORAGE_KEY);
     otherStorage.removeItem(API_KEY_STORAGE_KEY);
+    otherStorage.removeItem(API_BASE_URL_STORAGE_KEY);
     otherStorage.removeItem(MODEL_STORAGE_KEY);
+    otherStorage.removeItem(CUSTOM_MODEL_STORAGE_KEY);
+    otherStorage.removeItem(STORAGE_MODE_STORAGE_KEY);
+    otherStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
+    otherStorage.removeItem(LEGACY_MODEL_STORAGE_KEY);
 
+    setProvider(selectedProvider);
     setApiKey(trimmedKey);
+    setBaseUrl(selectedBaseUrl);
     setSettingsStatus({ type: "success", message: "设置已保存" });
   }
 
   function clearApiSettings() {
+    sessionStorage.removeItem(PROVIDER_STORAGE_KEY);
     sessionStorage.removeItem(API_KEY_STORAGE_KEY);
+    sessionStorage.removeItem(API_BASE_URL_STORAGE_KEY);
     sessionStorage.removeItem(MODEL_STORAGE_KEY);
+    sessionStorage.removeItem(CUSTOM_MODEL_STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_MODE_STORAGE_KEY);
+    sessionStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
+    sessionStorage.removeItem(LEGACY_MODEL_STORAGE_KEY);
+    localStorage.removeItem(PROVIDER_STORAGE_KEY);
     localStorage.removeItem(API_KEY_STORAGE_KEY);
+    localStorage.removeItem(API_BASE_URL_STORAGE_KEY);
     localStorage.removeItem(MODEL_STORAGE_KEY);
+    localStorage.removeItem(CUSTOM_MODEL_STORAGE_KEY);
+    localStorage.removeItem(STORAGE_MODE_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_MODEL_STORAGE_KEY);
+    setProvider(DEFAULT_PROVIDER);
+    setBaseUrl(providerById[DEFAULT_PROVIDER].defaultBaseUrl);
     setApiKey("");
     setModelChoice(DEFAULT_MODEL);
     setCustomModel("");
@@ -665,13 +854,13 @@ export default function Home() {
     const lowerName = file.name.toLowerCase();
 
     if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-      setFileWarning("当前 v0.3 版本仅支持 CSV 文件。Excel 文件请先另存为 CSV 后再上传。");
+      setFileWarning("当前 v0.4 版本仅支持 CSV 文件。Excel 文件请先另存为 CSV 后再上传。");
       event.target.value = "";
       return;
     }
 
     if (!lowerName.endsWith(".csv")) {
-      setFileWarning("请上传 .csv 文件。当前 v0.3 版本暂不解析其他格式。");
+      setFileWarning("请上传 .csv 文件。当前 v0.4 版本暂不解析其他格式。");
       event.target.value = "";
       return;
     }
@@ -716,14 +905,43 @@ export default function Home() {
 
     try {
       const trimmedApiKey = apiKey.trim();
-      const selectedModel = activeModel.trim() || DEFAULT_MODEL;
+      const selectedProvider = provider.trim();
+      const selectedModel = activeModel.trim();
+      const selectedBaseUrl = baseUrl.trim() || activeProvider.defaultBaseUrl;
+
+      if (!selectedProvider) {
+        setSettingsStatus({ type: "error", message: "请先选择 AI 服务商。" });
+        setSettingsOpen(true);
+        throw new Error("请先选择 AI 服务商。");
+      }
+
+      if (!trimmedApiKey) {
+        setSettingsStatus({ type: "error", message: "请先配置 API Key。" });
+        setSettingsOpen(true);
+        throw new Error("请先配置 API Key。");
+      }
+
+      if (!selectedModel) {
+        setSettingsStatus({ type: "error", message: "请先填写模型名称。" });
+        setSettingsOpen(true);
+        throw new Error("请先填写模型名称。");
+      }
+
+      if (requiresBaseUrl(selectedProvider) && !selectedBaseUrl) {
+        setSettingsStatus({ type: "error", message: "请填写 API Base URL。" });
+        setSettingsOpen(true);
+        throw new Error("请填写 API Base URL。");
+      }
+
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          provider: selectedProvider,
           apiKey: trimmedApiKey || undefined,
+          baseUrl: selectedBaseUrl || undefined,
           model: selectedModel,
           businessScenario: scenarioName,
           businessRequest,
@@ -735,15 +953,16 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        if (data.code === "missing_api_key" || data.code === "invalid_api_key" || data.code === "model_not_found") {
-          setSettingsStatus({ type: "error", message: data.error || "请检查 API 设置。" });
+        if (["missing_api_key", "invalid_api_key", "model_not_found", "missing_base_url", "unsupported_provider", "incompatible_api"].includes(data.code)) {
+          setSettingsStatus({ type: "error", message: data.message || data.error || "请检查 API 设置。" });
           setSettingsOpen(true);
         }
-        throw new Error(data.error || "生成失败，请稍后重试。");
+        throw new Error(data.message || data.error || "生成失败，请稍后重试。");
       }
 
-      setSections(Array.isArray(data.sections) ? data.sections : []);
-      setRawText(data.rawText || "");
+      const result = data.result || data;
+      setSections(Array.isArray(result.sections) ? result.sections : []);
+      setRawText(result.rawText || "");
     } catch (requestError) {
       setError(requestError.message || "生成失败，请稍后重试。");
     } finally {
@@ -793,7 +1012,7 @@ export default function Home() {
 
         <div className="mb-6 flex items-center justify-end gap-3">
           <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-[rgba(255,255,255,0.62)] backdrop-blur-xl">
-            {hasConfiguredApi ? "已配置 API" : "未配置 API"}
+            {hasConfiguredApi ? `已配置：${activeProvider.statusLabel}` : "未配置 API"}
           </span>
           <button
             type="button"
@@ -991,7 +1210,7 @@ export default function Home() {
                 />
 
                 <div className="rounded-[28px] border border-amber-200/20 bg-amber-200/10 px-4 py-3 text-sm font-semibold leading-6 text-amber-100">
-                  当前 v0.3 版本仅支持 CSV 文件，Excel 请先另存为 CSV。
+                  当前 v0.4 版本仅支持 CSV 文件，Excel 请先另存为 CSV。
                 </div>
 
                 <label className="mt-6 block">
@@ -1158,6 +1377,10 @@ export default function Home() {
         {settingsOpen ? (
           <SettingsModal
             open={settingsOpen}
+            provider={provider}
+            setProvider={setProvider}
+            baseUrl={baseUrl}
+            setBaseUrl={setBaseUrl}
             apiKey={apiKey}
             setApiKey={setApiKey}
             modelChoice={modelChoice}
