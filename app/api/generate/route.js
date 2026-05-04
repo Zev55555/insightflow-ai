@@ -11,35 +11,43 @@ const REQUIRED_SECTION_TITLES = [
 const PROVIDER_DEFAULTS = {
   openai: {
     label: "OpenAI",
-    type: "openai-compatible",
+    type: "openai",
+    adapter: "openai:responses",
     baseUrl: "https://api.openai.com/v1",
   },
   deepseek: {
     label: "DeepSeek",
     type: "openai-compatible",
+    adapter: "openai-compatible:chat/completions",
     baseUrl: "https://api.deepseek.com",
   },
   claude: {
     label: "Claude",
     type: "claude",
+    adapter: "claude:messages",
     baseUrl: "https://api.anthropic.com",
   },
   gemini: {
     label: "Gemini",
     type: "gemini",
+    adapter: "gemini:generateContent",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
   },
   "openai-compatible": {
     label: "OpenAI-Compatible",
     type: "openai-compatible",
+    adapter: "openai-compatible:chat/completions",
     baseUrl: "",
   },
   custom: {
     label: "自定义",
     type: "openai-compatible",
+    adapter: "custom:openai-compatible:chat/completions",
     baseUrl: "",
   },
 };
+
+const FALLBACK_MODEL = "gpt-4.1-mini";
 
 const SYSTEM_INSTRUCTION = `你是一名资深数据分析师和业务分析教练。你的任务是帮助数据分析新手把模糊的业务需求转化为清晰、可执行的分析流程。你不是代码助手，不要写 SQL、Python、pandas、Excel 公式或任何数据清洗代码。你需要重点关注业务理解、指标体系、分析维度、业务假设、分析路径、结论风险和汇报结构。
 
@@ -104,10 +112,12 @@ const SYSTEM_INSTRUCTION = `你是一名资深数据分析师和业务分析教�
 最终 JSON 的 sections 数组必须正好包含这 7 个中文标题：业务问题重写、指标体系设计、分析维度拆解、可能业务假设、分析路径规划、结论风险提醒、汇报大纲。`;
 
 class ProviderRequestError extends Error {
-  constructor({ status = 500, code = "unknown_error", message = "生成失败，请稍后重试", provider = "", model = "", rawText = "" }) {
+  constructor({ status = 500, code = "unknown_error", type = "", message = "生成失败，请稍后重试", apiMessage = "", provider = "", model = "", rawText = "" }) {
     super(message);
     this.status = status;
     this.code = code;
+    this.type = type;
+    this.apiMessage = apiMessage || extractApiErrorMessage(rawText);
     this.provider = provider;
     this.model = model;
     this.rawText = rawText;
@@ -257,6 +267,21 @@ function redactSensitiveText(value) {
   return String(value || "").replace(/sk-[A-Za-z0-9_-]+/g, "sk-****").replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer ****");
 }
 
+function extractApiErrorMessage(rawText) {
+  try {
+    const parsed = JSON.parse(String(rawText || ""));
+    return parsed?.error?.message || parsed?.message || "";
+  } catch {
+    return "";
+  }
+}
+
+function safeErrorSummary(value) {
+  const redacted = redactSensitiveText(value).replace(/\s+/g, " ").trim();
+  if (!redacted) return "未知错误";
+  return redacted.length > 180 ? `${redacted.slice(0, 180)}...` : redacted;
+}
+
 function safeJoinUrl(baseUrl, path) {
   const normalizedBase = String(baseUrl || "").trim().replace(/\/+$/, "");
   const normalizedPath = String(path || "").replace(/^\/+/, "");
@@ -269,7 +294,13 @@ function buildChatCompletionsUrl(baseUrl) {
   return safeJoinUrl(normalizedBase, "chat/completions");
 }
 
-function normalizeProviderConfig({ provider, apiKey, baseUrl, model }) {
+function buildResponsesUrl(baseUrl) {
+  const normalizedBase = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (normalizedBase.endsWith("/responses")) return normalizedBase;
+  return safeJoinUrl(normalizedBase, "responses");
+}
+
+function normalizeProviderConfig({ provider, apiKey, baseUrl, model, customModel }) {
   const normalizedProvider = String(provider || "").trim().toLowerCase();
   const providerConfig = PROVIDER_DEFAULTS[normalizedProvider];
 
@@ -292,8 +323,13 @@ function normalizeProviderConfig({ provider, apiKey, baseUrl, model }) {
   }
 
   const trimmedApiKey = String(apiKey || "").trim();
-  const trimmedModel = String(model || "").trim();
-  const finalBaseUrl = String(baseUrl || providerConfig.baseUrl || "").trim();
+  const trimmedModel =
+    String(model || "").trim() ||
+    String(customModel || "").trim() ||
+    String(process.env.OPENAI_MODEL || "").trim() ||
+    FALLBACK_MODEL;
+  const requestBaseUrl = String(baseUrl || "").trim();
+  const finalBaseUrl = normalizedProvider === "openai" ? providerConfig.baseUrl : String(requestBaseUrl || providerConfig.baseUrl || "").trim();
 
   if (!trimmedApiKey) {
     throw new ProviderRequestError({
@@ -328,6 +364,7 @@ function normalizeProviderConfig({ provider, apiKey, baseUrl, model }) {
     provider: normalizedProvider,
     label: providerConfig.label,
     type: providerConfig.type,
+    adapter: providerConfig.adapter,
     apiKey: trimmedApiKey,
     baseUrl: finalBaseUrl,
     model: trimmedModel,
@@ -341,14 +378,42 @@ function mapProviderError(error, provider) {
   const rawCode = String(error?.code || error?.error?.code || "").toLowerCase();
   const rawType = String(error?.type || error?.error?.type || "").toLowerCase();
   const rawText = String(error?.rawText || error?.message || "").toLowerCase();
+  const providerMessage = error?.apiMessage || error?.message || error?.rawText || "";
+  const safeSummary = safeErrorSummary(providerMessage);
+  const model = error?.model || "";
 
-  if (status === 401 || status === 403 || rawCode.includes("invalid_api_key") || rawType.includes("authentication")) {
+  if (
+    status === 401 ||
+    rawCode.includes("invalid_api_key") ||
+    rawText.includes("incorrect api key") ||
+    rawText.includes("invalid api key")
+  ) {
     return new ProviderRequestError({
       status: 401,
       code: "invalid_api_key",
+      type: error?.type || rawType,
       message: "API Key 无效，请检查设置",
       provider,
-      model: error?.model,
+      model,
+      rawText: error?.rawText,
+    });
+  }
+
+  if (
+    status === 403 ||
+    rawCode.includes("permission") ||
+    rawType.includes("permission") ||
+    rawText.includes("permission") ||
+    rawText.includes("unauthorized") ||
+    rawText.includes("access")
+  ) {
+    return new ProviderRequestError({
+      status: 403,
+      code: "permission_denied",
+      type: error?.type || rawType,
+      message: `当前 API Key 可能无权访问该模型：${model || "未指定模型"}`,
+      provider,
+      model,
       rawText: error?.rawText,
     });
   }
@@ -357,9 +422,10 @@ function mapProviderError(error, provider) {
     return new ProviderRequestError({
       status: 429,
       code: "insufficient_quota",
+      type: error?.type || rawType,
       message: "API 额度不足，请检查账户余额或用量限制",
       provider,
-      model: error?.model,
+      model,
       rawText: error?.rawText,
     });
   }
@@ -368,9 +434,10 @@ function mapProviderError(error, provider) {
     return new ProviderRequestError({
       status: 429,
       code: "rate_limit",
+      type: error?.type || rawType,
       message: "请求过于频繁，请稍后重试",
       provider,
-      model: error?.model,
+      model,
       rawText: error?.rawText,
     });
   }
@@ -384,9 +451,22 @@ function mapProviderError(error, provider) {
     return new ProviderRequestError({
       status: 404,
       code: "model_not_found",
-      message: "当前模型不可用，请检查模型名称",
+      type: error?.type || rawType,
+      message: `当前模型不存在或你的账号无权访问：${model || "未指定模型"}`,
       provider,
-      model: error?.model,
+      model,
+      rawText: error?.rawText,
+    });
+  }
+
+  if ((rawCode.includes("invalid_request") || rawType.includes("invalid_request")) && rawText.includes("model")) {
+    return new ProviderRequestError({
+      status: status >= 400 ? status : 400,
+      code: "invalid_request_error",
+      type: error?.type || rawType,
+      message: `当前模型请求失败，请检查模型名或账号权限：${model || "未指定模型"}`,
+      provider,
+      model,
       rawText: error?.rawText,
     });
   }
@@ -395,9 +475,10 @@ function mapProviderError(error, provider) {
     return new ProviderRequestError({
       status: 400,
       code: "incompatible_api",
+      type: error?.type || rawType,
       message: "当前接口可能不兼容 OpenAI 格式，请检查 API Base URL、模型名称或服务商文档",
       provider,
-      model: error?.model,
+      model,
       rawText: error?.rawText,
     });
   }
@@ -405,9 +486,10 @@ function mapProviderError(error, provider) {
   return new ProviderRequestError({
     status: 500,
     code: "unknown_error",
-    message: "生成失败，请稍后重试",
+    type: error?.type || rawType,
+    message: `生成失败：${safeSummary}`,
     provider,
-    model: error?.model,
+    model,
     rawText: error?.rawText,
   });
 }
@@ -434,7 +516,9 @@ function throwForFailedResponse(response, payload, config) {
   throw new ProviderRequestError({
     status: response.status,
     code: errorPayload.code || errorPayload.status || "",
+    type: errorPayload.type || errorPayload.error?.type || "",
     message: errorPayload.message || response.statusText || "模型请求失败",
+    apiMessage: errorPayload.message || "",
     provider: config.provider,
     model: config.model,
     rawText: payload.text,
@@ -464,6 +548,57 @@ async function callOpenAICompatible(config, userPrompt) {
   throwForFailedResponse(response, payload, config);
 
   const text = payload.json?.choices?.[0]?.message?.content || payload.json?.choices?.[0]?.text || "";
+  if (!text) {
+    throw new ProviderRequestError({
+      status: 500,
+      code: "unknown_error",
+      message: "模型没有返回可用内容",
+      provider: config.provider,
+      model: config.model,
+      rawText: payload.text,
+    });
+  }
+
+  return text;
+}
+
+function extractResponsesText(payload) {
+  if (typeof payload.json?.output_text === "string" && payload.json.output_text.trim()) {
+    return payload.json.output_text;
+  }
+
+  const output = Array.isArray(payload.json?.output) ? payload.json.output : [];
+  return output
+    .flatMap((item) => (Array.isArray(item?.content) ? item.content : []))
+    .map((part) => {
+      if (typeof part?.text === "string") return part.text;
+      if (typeof part?.content === "string") return part.content;
+      if (typeof part?.output_text === "string") return part.output_text;
+      if (typeof part?.refusal === "string") return part.refusal;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function callOpenAIResponses(config, userPrompt) {
+  const response = await fetch(buildResponsesUrl(config.baseUrl), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.model,
+      instructions: SYSTEM_INSTRUCTION,
+      input: userPrompt,
+    }),
+  });
+
+  const payload = await readResponsePayload(response);
+  throwForFailedResponse(response, payload, config);
+
+  const text = extractResponsesText(payload);
   if (!text) {
     throw new ProviderRequestError({
       status: 500,
@@ -566,6 +701,10 @@ async function callGemini(config, userPrompt) {
 }
 
 async function callModel(config, userPrompt) {
+  if (config.type === "openai") {
+    return callOpenAIResponses(config, userPrompt);
+  }
+
   if (config.type === "openai-compatible") {
     return callOpenAICompatible(config, userPrompt);
   }
@@ -616,6 +755,23 @@ export async function POST(request) {
       apiKey: body.apiKey,
       baseUrl: body.baseUrl,
       model: body.model,
+      customModel: body.customModel,
+    });
+
+    console.log("Generate request config:", {
+      provider: config.provider,
+      model: config.model,
+      baseUrl: config.baseUrl,
+      hasApiKey: Boolean(config.apiKey),
+      adapter: config.adapter,
+      interface:
+        config.type === "openai"
+          ? "responses"
+          : config.type === "openai-compatible"
+            ? "chat/completions"
+            : config.type === "claude"
+              ? "messages"
+              : "generateContent",
     });
 
     const rawText = await callModel(
@@ -644,9 +800,19 @@ export async function POST(request) {
     console.error("AI provider request failed", {
       status: safeError.status,
       code: safeError.code,
+      type: safeError.type,
       provider: safeError.provider,
       model: safeError.model,
-      message: redactSensitiveText(safeError.message),
+      message: safeErrorSummary(safeError.apiMessage || safeError.rawText || safeError.message),
+    });
+
+    console.error("Generate API error:", {
+      provider: safeError.provider,
+      model: safeError.model,
+      status: safeError.status,
+      code: safeError.code,
+      type: safeError.type,
+      message: safeErrorSummary(safeError.apiMessage || safeError.rawText || safeError.message),
     });
 
     return Response.json(

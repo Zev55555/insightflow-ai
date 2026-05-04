@@ -505,6 +505,9 @@ function SettingsModal({
                   className="glass-input mt-3 min-h-12 w-full px-4 py-3 text-sm"
                 />
               ) : null}
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                当前实际使用模型：{resolveModel(modelChoice, customModel) || "未填写"}
+              </p>
             </div>
 
             <div>
@@ -685,7 +688,7 @@ export default function Home() {
   const canContinueFromStep2 = Boolean(scenarioName.trim() && businessRequest.trim());
   const canContinueFromStep3 = Boolean(availableInformation.trim() || fileSummary);
   const activeProvider = getProviderConfig(provider);
-  const activeModel = resolveModel(modelChoice, customModel) || getDefaultModel(provider) || DEFAULT_MODEL;
+  const activeModel = resolveModel(modelChoice, customModel);
   const hasConfiguredApi = Boolean(provider && apiKey.trim());
 
   useEffect(() => {
@@ -943,6 +946,7 @@ export default function Home() {
           apiKey: trimmedApiKey || undefined,
           baseUrl: selectedBaseUrl || undefined,
           model: selectedModel,
+          customModel: customModel.trim() || undefined,
           businessScenario: scenarioName,
           businessRequest,
           availableInformation,
@@ -1317,7 +1321,7 @@ export default function Home() {
               >
                 <StepHeader eyebrow="第 4 步" title="生成并查看分析流程" description="确认输入后生成结构化分析报告。" />
 
-                <div className="grid gap-3 rounded-[28px] border border-white/12 bg-white/[0.07] p-5 text-sm text-slate-300 sm:grid-cols-3">
+                <div className="grid gap-3 rounded-[28px] border border-white/12 bg-white/[0.07] p-5 text-sm text-slate-300 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <p className="font-bold text-white">业务场景</p>
                     <p className="mt-2 leading-6">{scenarioName}</p>
@@ -1329,6 +1333,10 @@ export default function Home() {
                   <div>
                     <p className="font-bold text-white">已知信息</p>
                     <p className="mt-2 leading-6">{fileSummary ? `已识别 CSV：${fileSummary.fileName}` : "手动填写"}</p>
+                  </div>
+                  <div>
+                    <p className="font-bold text-white">当前服务商 / 模型</p>
+                    <p className="mt-2 leading-6">{activeProvider.statusLabel} / {activeModel || "未填写"}</p>
                   </div>
                 </div>
 
