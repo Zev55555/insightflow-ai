@@ -376,7 +376,7 @@ function SettingsModal({
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8 backdrop-blur-xl"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/55 px-3 py-4 backdrop-blur-xl sm:px-4 sm:py-6"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -386,35 +386,37 @@ function SettingsModal({
       aria-label="API 设置"
     >
       <motion.div
-        className="glass-panel max-h-[92vh] w-full max-w-2xl overflow-y-auto p-6 sm:p-8"
+        className="glass-panel flex max-h-[calc(100dvh-32px)] w-full max-w-2xl flex-col overflow-hidden sm:max-h-[calc(100vh-48px)]"
         initial={{ opacity: 0, y: 18, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 12, scale: 0.98 }}
         transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="relative z-10">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-violet-200/18 bg-violet-300/10 px-3 py-1.5 text-xs font-semibold text-violet-100">
-                <KeyRound className="h-3.5 w-3.5" />
-                BYOK 多模型配置
+        <div className="relative z-10 flex max-h-[inherit] min-h-0 flex-col">
+          <div className="shrink-0 px-5 pb-4 pt-5 sm:px-8 sm:pt-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-violet-200/18 bg-violet-300/10 px-3 py-1.5 text-xs font-semibold text-violet-100">
+                  <KeyRound className="h-3.5 w-3.5" />
+                  BYOK 多模型配置
+                </div>
+                <h2 className="text-2xl font-bold text-white">API 设置</h2>
+                <p className="mt-2 text-sm leading-7 text-[rgba(255,255,255,0.68)]">
+                  选择 AI 服务商并配置自己的 API Key、模型名称和必要的 API Base URL。
+                </p>
               </div>
-              <h2 className="text-2xl font-bold text-white">API 设置</h2>
-              <p className="mt-2 text-sm leading-7 text-[rgba(255,255,255,0.68)]">
-                选择 AI 服务商并配置自己的 API Key、模型名称和必要的 API Base URL。
-              </p>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-full border border-white/10 bg-white/8 p-2 text-slate-200 transition duration-150 hover:border-violet-200/40 hover:bg-white/14"
+                aria-label="关闭设置"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-full border border-white/10 bg-white/8 p-2 text-slate-200 transition duration-150 hover:border-violet-200/40 hover:bg-white/14"
-              aria-label="关闭设置"
-            >
-              <X className="h-5 w-5" />
-            </button>
           </div>
 
-          <div className="mt-7 space-y-5">
+          <div className="settings-modal-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-5 sm:px-8">
             <div>
               <span className="mb-3 block text-sm font-semibold text-slate-100">AI 服务商</span>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -561,11 +563,13 @@ function SettingsModal({
             </div>
           </div>
 
-          <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <PrimaryButton onClick={onSave}>保存设置</PrimaryButton>
-            <SecondaryButton onClick={onClear} icon={Trash2}>
-              清除配置
-            </SecondaryButton>
+          <div className="shrink-0 border-t border-white/10 bg-[#100b24]/72 px-5 py-4 backdrop-blur-2xl sm:px-8 sm:py-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <PrimaryButton onClick={onSave}>保存设置</PrimaryButton>
+              <SecondaryButton onClick={onClear} icon={Trash2}>
+                清除配置
+              </SecondaryButton>
+            </div>
           </div>
         </div>
       </motion.div>
